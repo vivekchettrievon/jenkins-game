@@ -2,47 +2,75 @@ pipeline {
 
     agent any
 
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    environment {
+        IMAGE_NAME = "dockerhubevon/jenkins-game"
+        IMAGE_TAG  = "${BUILD_NUMBER}"
+    }
+
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Repository checked out successfully.'
+                echo "Repository checked out."
             }
         }
 
-        stage('Validate Project') {
+        stage('Validate') {
             steps {
                 sh '''
-                echo "Checking project structure..."
+                echo "Validating project..."
 
                 ls -lah
 
-                test -f index.html
-                test -f style.css
-                test -f script.js
+                test -f app/index.html
+                test -f app/style.css
+                test -f app/script.js
 
                 echo "Validation Successful"
                 '''
             }
         }
 
-        stage('Build') {
+        stage('Docker Build') {
             steps {
                 sh '''
-                echo "Nothing to compile for HTML project."
+                echo "Building Docker Image..."
+
+                docker build \
+                -f docker/Dockerfile \
+                -t ${IMAGE_NAME}:${IMAGE_TAG} .
+
+                docker images | grep jenkins-game
                 '''
             }
         }
 
-        stage('Package') {
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+
+                    sh '''
+                    echo "$DOCKER_PASS" | docker login \
+                        -u "$DOCKER_USER" \
+                        --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Docker Push') {
             steps {
                 sh '''
-                mkdir -p build
-                cp index.html build/
-                cp style.css build/
-                cp script.js build/
-
-                echo "Packaging completed."
+                docker push ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
@@ -51,18 +79,17 @@ pipeline {
 
     post {
 
-        always {
-            echo "Pipeline Finished"
-        }
-
         success {
-            echo "Build Successful"
+            echo "CI Pipeline Completed Successfully!"
         }
 
         failure {
-            echo "Build Failed"
+            echo "CI Pipeline Failed!"
         }
 
+        always {
+            sh 'docker logout || true'
+        }
     }
 
 }
